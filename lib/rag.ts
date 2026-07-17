@@ -2,30 +2,71 @@ import fs from "fs/promises";
 import path from "path";
 import { embed, chat, hasLlm } from "./llm";
 
-const DATA = path.join(process.cwd(), "data");
-const CORPUS = path.join(DATA, "corpus.json");
-const VECTORS = path.join(DATA, "vectors.json");
+/**
+ * 语料库(内存态单例)。
+ * - 进程启动时从 data/corpus.json 种子加载一次。
+ * - 后台上传的文档只进内存(按需求:不落库、重启回退到种子),满足"AI 架构简单"的要求。
+ */
 
+type Doc = { id: string; title: string; intro: string; chunks: string[] };
 export type DocMeta = { id: string; title: string; intro: string };
-export type Chunk = { docId: string; title: string; text: string };
+type Chunk = { docId: string; title: string; text: string };
 export type Retrieved = { text: string; source: string };
 
-/** 语料元数据(标题 + 简介),供前端下拉展示 */
-export async function getCorpusMeta(): Promise<DocMeta[]> {
-  const raw = await fs.readFile(CORPUS, "utf8");
+let docs: Doc[] = [];
+let vectors: Record<string, number[]> = {};
+let loaded = false;
+
+export async function ensureLoaded() {
+  if (loaded) return;
+  const corpusPath = path.join(process.cwd(), "data", "corpus.json");
+  const raw = await fs.readFile(corpusPath, "utf8");
   const json = JSON.parse(raw);
-  return (json.docs || []).map((d: any) => ({ id: d.id, title: d.title, intro: d.intro }));
+  docs = json.docs || [];
+  try {
+    const v = JSON.parse(
+      await fs.readFile(path.join(process.cwd(), "data", "vectors.json"), "utf8")
+    );
+    for (const e of v.embeddings || []) vectors[`${e.docId}::${e.text}`] = e.vector;
+  } catch {
+    // 无向量缓存则走关键词降级
+  }
+  loaded = true;
 }
 
-/** 展开所有分块 */
-export async function getChunks(): Promise<Chunk[]> {
-  const raw = await fs.readFile(CORPUS, "utf8");
-  const json = JSON.parse(raw);
-  const chunks: Chunk[] = [];
-  for (const d of json.docs || []) {
-    for (const c of d.chunks || []) chunks.push({ docId: d.id, title: d.title, text: c });
+/** 后台上传:切分 + (配 Key 时)向量化 + 进内存 */
+export async function addDoc(input: {
+  title: string;
+  intro: string;
+  content: string;
+}): Promise<{ id: string; title: string; intro: string; chunks: string[] }> {
+  await ensureLoaded();
+  const id = "doc-" + Date.now().toString(36);
+  const chunks = String(input.content)
+    .split(/\n{2,}/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  docs.push({ id, title: input.title, intro: input.intro || "", chunks });
+  if (hasLlm()) {
+    try {
+      for (const c of chunks) vectors[`${id}::${c}`] = await embed(c);
+    } catch (e) {
+      console.error("[rag] embedding 失败", e);
+    }
   }
-  return chunks;
+  return { id, title: input.title, intro: input.intro, chunks };
+}
+
+export async function getCorpusMeta(): Promise<DocMeta[]> {
+  await ensureLoaded();
+  return docs.map((d) => ({ id: d.id, title: d.title, intro: d.intro }));
+}
+
+export async function getChunks(): Promise<Chunk[]> {
+  await ensureLoaded();
+  const out: Chunk[] = [];
+  for (const d of docs) for (const c of d.chunks) out.push({ docId: d.id, title: d.title, text: c });
+  return out;
 }
 
 function cosine(a: number[], b: number[]): number {
@@ -51,27 +92,15 @@ function keywordScore(q: string, text: string): number {
   return s;
 }
 
-async function loadVectors(): Promise<Record<string, number[]>> {
-  try {
-    const raw = await fs.readFile(VECTORS, "utf8");
-    const json = JSON.parse(raw);
-    const map: Record<string, number[]> = {};
-    for (const e of json.embeddings || []) map[`${e.docId}::${e.text}`] = e.vector;
-    return map;
-  } catch {
-    return {};
-  }
-}
-
 /** 检索 topK 相关分块(有 Key 走向量余弦,否则走关键词) */
 export async function retrieve(query: string, topK = 3): Promise<Retrieved[]> {
+  await ensureLoaded();
   const chunks = await getChunks();
   let scored: { chunk: Chunk; score: number }[] = [];
 
   if (hasLlm()) {
     try {
       const vec = await embed(query);
-      const vectors = await loadVectors();
       scored = chunks.map((chunk) => {
         const v = vectors[`${chunk.docId}::${chunk.text}`];
         const score = v ? cosine(vec, v) : keywordScore(query, chunk.text);
@@ -103,7 +132,12 @@ export async function answer(
 
   if (!hasLlm()) {
     const snippet = retrieved.map((r) => r.text).join(" ");
-    const text = `（演示模式:尚未配置大模型 API Key,以下为基于资料的原文摘录）\n\n${snippet.slice(0, 320)}…\n\n引用来源:${sources.join("、")}。配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`;
+    const text = `（演示模式:尚未配置大模型 API Key,以下为基于资料的原文摘录）\n\n${snippet.slice(
+      0,
+      320
+    )}…\n\n引用来源:${sources.join(
+      "、"
+    )}。配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`;
     return { text, sources };
   }
 

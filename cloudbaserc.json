@@ -1,0 +1,17 @@
+{
+  "$schema": "https://framework.cloudbase.io/schema/latest.json",
+  "envId": "{{envId}}",
+  "framework": {
+    "name": "personal-site",
+    "plugins": {
+      "client": {
+        "use": "@cloudbase/framework-plugin-next",
+        "inputs": {
+          "runtime": "node:20",
+          "memory": 512,
+          "timeout": 30
+        }
+      }
+    }
+  }
+}

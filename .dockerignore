@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env*.local
+.env
+*.log
+data/objects
+data/messages.json
+data/vectors.json

@@ -66,7 +66,7 @@ export default function Hero() {
               <div className="pdf-actions">
                 <a
                   className="pdf-dl"
-                  href="/resume.pdf"
+                  href="/api/resume"
                   target="_blank"
                   rel="noopener"
                   download
@@ -84,11 +84,11 @@ export default function Hero() {
               </div>
             </div>
             <div className="pdf-body">
-              <object data="/resume.pdf" type="application/pdf" className="pdf-frame">
+              <object data="/api/resume" type="application/pdf" className="pdf-frame">
                 <div className="pdf-fallback">
                   <p>简历 PDF 尚未上传。</p>
                   <p>
-                    把你的 <code>resume.pdf</code> 放到项目 <code>public/resume.pdf</code> 即可在此预览与下载。
+                    进入后台「简历」标签页,上传你的 <code>resume.pdf</code> 即可在此预览与下载。
                   </p>
                 </div>
               </object>

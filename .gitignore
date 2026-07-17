@@ -5,6 +5,8 @@
 .env
 next-env.d.ts
 *.log
+# 运行时生成(本地降级存储 / 向量缓存),不入库
+data/objects/
 data/messages.json
 data/vectors.json
 .DS_Store

@@ -64,7 +64,7 @@ export default function Sidebar() {
         <div className="s-social">
           <a href="#">GitHub</a>
           <a href="#">邮箱</a>
-          <a href="/resume.pdf" target="_blank" rel="noopener">
+          <a href="/api/resume" target="_blank" rel="noopener">
             简历
           </a>
           <a href="/admin">后台</a>

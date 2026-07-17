@@ -1,9 +1,11 @@
-import fs from "fs/promises";
-import path from "path";
 import { randomUUID } from "crypto";
+import { readJson, writeJson } from "./storage";
 
-const DATA = path.join(process.cwd(), "data");
-const FILE = path.join(DATA, "messages.json");
+/**
+ * 留言存储:经统一对象存储层(本地文件降级 / 腾讯云 COS 持久化)。
+ * 单 JSON 数组,读-改-写;低流量足够。多实例部署请改用数据库。
+ */
+const KEY = "messages.json";
 
 export type Message = {
   id: string;
@@ -13,30 +15,19 @@ export type Message = {
   createdAt: string;
 };
 
-/** 保存留言(开发期写本地文件;生产期可替换为 Postgres) */
 export async function saveMessage(m: Omit<Message, "id" | "createdAt">): Promise<Message> {
   const full: Message = {
     ...m,
     id: randomUUID(),
     createdAt: new Date().toISOString(),
   };
-  let arr: Message[] = [];
-  try {
-    const raw = await fs.readFile(FILE, "utf8");
-    arr = JSON.parse(raw);
-  } catch {
-    // 文件不存在则新建
-  }
+  const arr = await readJson<Message[]>(KEY, []);
   arr.push(full);
-  await fs.writeFile(FILE, JSON.stringify(arr, null, 2), "utf8");
+  await writeJson(KEY, arr);
   return full;
 }
 
 export async function listMessages(): Promise<Message[]> {
-  try {
-    const raw = await fs.readFile(FILE, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  const arr = await readJson<Message[]>(KEY, []);
+  return arr.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
