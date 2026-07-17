@@ -1,0 +1,12 @@
+# 统一行尾为 LF,确保仓库在 Windows / macOS / Linux 任何平台拉取后都能正常构建部署
+* text=auto eol=lf
+
+# 二进制资源(如有)按二进制处理,不转换行尾
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
