@@ -8,7 +8,7 @@
 - **纯 CSS**（无 UI 框架，极简商务风格，含明暗主题、响应式、滚动微交互）
 - **通义千问 DashScope**（OpenAI 兼容）— RAG 的 embedding + 对话，未配 Key 时自动降级
 - **Resend** — 留言邮件通知，未配 Key 时打印控制台
-- **本地文件存储**（开发期）/ **Postgres + pgvector**（生产期，预留开关）
+- **本地文件存储**（开发期）/ **腾讯云 COS**（生产持久化）；Postgres + pgvector 是后续扩展选项
 
 ## 目录结构
 
@@ -32,8 +32,7 @@ personal-site/
 ├─ lib/                     # llm(通义) / rag / email / auth / store
 ├─ data/
 │  ├─ corpus.json           # 语料种子（标题+简介+分块），随仓库提交
-│  ├─ messages.json         # 运行时生成（已 gitignore）
-│  └─ vectors.json          # 运行时生成（已 gitignore）
+│  └─ objects/rag/index.json # 运行时生成：持久化文档、分块与向量（已 gitignore；配置 COS 后存入桶）
 └─ .env.example             # 全部环境变量模板
 ```
 
@@ -60,28 +59,26 @@ npm run dev                  # http://localhost:3000
 | `MAIL_FROM` | 发件人，默认 `onerr@resend.dev` | 否 |
 | `ADMIN_USER` / `ADMIN_PASS` | 后台登录账号密码，**生产务必修改** | 是 |
 | `AUTH_SECRET` | 登录 token 签名密钥，生产改随机长串 | 是 |
-| `DATABASE_URL` | Postgres 连接串（启用 pgvector）。**填了后留言/向量自动切 Postgres** | 生产推荐 |
-| `NEXT_PUBLIC_SITE_NAME` / `NEXT_PUBLIC_SITE_URL` | SEO 站点名与域名 | 否 |
+| `COS_ENDPOINT` / `COS_REGION` / `COS_BUCKET` | 腾讯云 COS 的接口、地域与桶名 | 生产推荐 |
+| `COS_SECRET_ID` / `COS_SECRET_KEY` | 仅有该私有桶读写权限的 CAM 子账号密钥 | 配 COS 时必填 |
 
 ## 部署到 Vercel（对外开放）
 
 1. 把 `personal-site/` 推到 GitHub（或 `npx vercel` 直接部署）。
 2. 在 Vercel 项目 **Settings → Environment Variables** 填入上述变量
-   （至少 `ADMIN_USER` / `ADMIN_PASS` / `AUTH_SECRET`；推荐加 `QWEN_API_KEY` 与 `RESEND_API_KEY`）。
+   （至少 `ADMIN_USER` / `ADMIN_PASS` / `AUTH_SECRET`；生产必须加 COS 的五项变量，推荐再加 `QWEN_API_KEY` 与 `RESEND_API_KEY`）。
 3. 部署后访问首页即可；后台在 `/admin`。
 
-> **Serverless 文件系统只读提醒**：Vercel 等平台运行时文件系统不可写。
-> - 语料 `corpus.json` 在**构建时**已随仓库包含，只读读取正常（首页下拉、RAG 检索都 OK）。
->   要更新语料：本地改 `data/corpus.json` 后重新部署，或接入下方 Postgres 方案。
-> - 留言：配置 `RESEND_API_KEY` 后**实时邮件通知你**（即使不接数据库也能收到）。
-> - 后台"查看历史留言"需要持久库：填 `DATABASE_URL`（Supabase/Neon，启用 pgvector），
->   存储自动从本地文件切换到 Postgres（见下方 TODO）。
+> **Serverless 文件系统只读提醒**：Vercel 等平台运行时文件不可作为持久化存储。
+> - 配置 COS 后，简历、留言、访客记录以及 RAG 的 `rag/index.json` 都会写入私有桶；后台新增语料在重启/重新部署后仍可用。
+> - RAG 索引含文档分块与 embedding。首次真实检索会为缺少的向量补齐 embedding 并保存；更换 embedding 模型后会自动重新向量化。
+> - 未配置 COS 时，生产环境只适合读取随构建包含的种子语料；不要在该模式使用后台上传、简历上传或留言持久化。
 
 ## 后台使用
 
 1. 访问 `/admin`，用 `ADMIN_USER` / `ADMIN_PASS` 登录。
-2. **上传 RAG 语料**：粘贴文档内容（空行分段），配 `QWEN_API_KEY` 后自动向量化入库；
-   未配 Key 时仍会存入 `corpus.json`（聊天走关键词降级）。
+2. **上传 RAG 语料**：粘贴文档内容（空行分段）。文档与分块会保存到 `rag/index.json`；
+   配 `QWEN_API_KEY` 时自动向量化，未配 Key 时先保存文档并走关键词降级。
 3. **查看留言**：登录后可看到所有访客留言。
 
 ## RAG 严格性
@@ -91,9 +88,7 @@ npm run dev                  # http://localhost:3000
 
 ## 已知 TODO（生产增强）
 
-- [ ] `lib/store.ts` 与 `admin/docs` 的 Postgres 持久化分支（当前仅本地文件写入，
-      生产 Serverless 不可写；已预留 `DATABASE_URL` 判断）。
-- [ ] 简历 PDF：将真实 `public/resume.pdf` 放入，前端弹窗已用 `<iframe>` 占位可直连。
+- [ ] 语料量或并发增长后，迁移到 TencentDB for PostgreSQL + pgvector，改为数据库侧向量检索。
 - [ ] 可选：访客匿名统计（看哪些地区/公司在浏览，助力求职）。
 
 ## 设计稿

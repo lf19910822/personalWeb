@@ -30,10 +30,15 @@ type Status = {
   messageCount: number;
   visitorCount: number;
 };
+type RagDocument = { id: string; fileName: string; title: string; intro: string; parentCount: number; childCount: number; updatedAt: string };
+type RagPreview = { documentId: string; title: string; intro: string; parentCount: number; childCount: number; estimatedEmbeddingTokens: number; estimatedEmbeddingCost: number };
+type UsageEntry = { requests: number; inputTokens: number; outputTokens: number; estimatedCost: number };
+type UsageDay = { date: string; chat: UsageEntry; embedding: UsageEntry };
 
 const TABS = [
   { id: "overview", label: "概览" },
   { id: "docs", label: "语料" },
+  { id: "usage", label: "RAG 用量" },
   { id: "resume", label: "简历" },
   { id: "messages", label: "留言" },
   { id: "visitors", label: "访客" },
@@ -50,9 +55,10 @@ export default function Admin() {
   const [status, setStatus] = useState<Status | null>(null);
 
   // 语料
-  const [title, setTitle] = useState("");
-  const [intro, setIntro] = useState("");
-  const [content, setContent] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [preview, setPreview] = useState<RagPreview[]>([]);
+  const [documents, setDocuments] = useState<RagDocument[]>([]);
+  const [usage, setUsage] = useState<UsageDay[]>([]);
   const [uploadMsg, setUploadMsg] = useState("");
 
   // 简历
@@ -67,6 +73,8 @@ export default function Admin() {
     if (loggedIn) {
       loadStatus();
       loadMessages();
+      loadDocuments();
+      loadUsage();
     }
   }, [loggedIn]);
 
@@ -107,26 +115,45 @@ export default function Admin() {
     const res = await fetch("/api/admin/resume", { credentials: "include" });
     if (res.ok) setResumeExists((await res.json()).exists);
   }
+  async function loadDocuments() {
+    const res = await fetch("/api/admin/docs", { credentials: "include" });
+    if (res.ok) setDocuments((await res.json()).documents || []);
+  }
+  async function loadUsage() {
+    const res = await fetch("/api/admin/usage", { credentials: "include" });
+    if (res.ok) setUsage((await res.json()).days || []);
+  }
 
   async function doUpload(e: React.FormEvent) {
     e.preventDefault();
     setUploadMsg("");
+    if (!files.length) return setUploadMsg("✗ 请选择 Markdown 文件");
+    const fd = new FormData();
+    fd.append("action", preview.length ? "import" : "preview");
+    files.forEach((file) => fd.append("files", file));
     const res = await fetch("/api/admin/docs", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, intro, content }),
+      body: fd,
     });
     const d = await res.json();
     if (res.ok) {
-      setUploadMsg("✓ 已加入内存语料库:" + title);
-      setTitle("");
-      setIntro("");
-      setContent("");
-      loadStatus();
+      if (!preview.length) {
+        setPreview(d.documents || []);
+        setUploadMsg("✓ 预检完成，请确认后再次点击导入");
+      } else {
+        setUploadMsg("✓ 导入完成：" + (d.results || []).filter((r: any) => r.ok).length + " 份成功");
+        setFiles([]); setPreview([]); loadDocuments(); loadStatus(); loadUsage();
+      }
     } else {
-      setUploadMsg("✗ " + (d.error || "添加失败"));
+      setPreview([]); setUploadMsg("✗ " + (d.error || "预检失败"));
     }
+  }
+
+  async function deleteDocument(id: string) {
+    if (!window.confirm("永久删除这份语料及其向量？")) return;
+    const res = await fetch(`/api/admin/docs?id=${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+    if (res.ok) { await loadDocuments(); await loadStatus(); }
   }
 
   async function doResume(e: React.FormEvent) {
@@ -243,48 +270,30 @@ export default function Admin() {
 
       {tab === "docs" && (
         <div className="card">
-          <h2 style={{ fontSize: 20 }}>上传 RAG 语料(内存态)</h2>
+          <h2 style={{ fontSize: 20 }}>上传 RAG Markdown 文档</h2>
           <p className="lead" style={{ fontSize: 15 }}>
-            粘贴文档内容(空行分段),自动切分并(配 QWEN_API_KEY 时)向量化,加入内存语料库。
-            注意:内存态,服务器重启会回退到种子语料。
+            仅支持 .md；预检后采用父子切分，确认才会向量化并保存到 {status?.storage === "cos" ? "腾讯云 COS" : "本地 data/objects/"}。
           </p>
           <form onSubmit={doUpload}>
             <div className="field">
-              <label htmlFor="d-title">文档标题</label>
+              <label htmlFor="d-files">选择 Markdown（最多 20 份、单份 ≤256KB、总计 ≤1MB）</label>
               <input
-                id="d-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="如:A 项目复盘"
+                id="d-files" type="file" accept=".md,text/markdown" multiple
+                onChange={(e) => { setFiles(Array.from(e.target.files || [])); setPreview([]); }}
               />
             </div>
-            <div className="field">
-              <label htmlFor="d-intro">一句话简介(展示用)</label>
-              <input
-                id="d-intro"
-                value={intro}
-                onChange={(e) => setIntro(e.target.value)}
-                placeholder="如:A 项目的难点与方案"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="d-content">文档内容(空行分段)</label>
-              <textarea
-                id="d-content"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder={"第一段…\n\n第二段…"}
-              />
-            </div>
-            <button className="btn" type="submit">
-              添加到语料库
-            </button>
+            <button className="btn" type="submit">{preview.length ? "确认导入" : "预检文档"}</button>
             {uploadMsg && (
               <div className={uploadMsg.startsWith("✓") ? "ok" : "err"}>{uploadMsg}</div>
             )}
           </form>
+          {preview.length > 0 && <div className="m-item">{preview.map((item) => <div key={item.documentId}>{item.documentId} · 父块 {item.parentCount} · 子块 {item.childCount} · 预计 {item.estimatedEmbeddingTokens} Token / ¥{item.estimatedEmbeddingCost.toFixed(4)}</div>)}</div>}
+          <h3 style={{ marginTop: 28 }}>已持久化文档</h3>
+          {documents.map((doc) => <div className="m-item" key={doc.id}><div className="m-meta">{doc.fileName} · 父块 {doc.parentCount} · 子块 {doc.childCount}{doc.updatedAt && ` · ${new Date(doc.updatedAt).toLocaleString("zh-CN")}`}</div><div>{doc.title} · {doc.intro}</div><button className="theme-btn" onClick={() => deleteDocument(doc.id)}>永久删除</button></div>)}
         </div>
       )}
+
+      {tab === "usage" && <UsagePanel usage={usage} />}
 
       {tab === "resume" && (
         <div className="card">
@@ -360,4 +369,18 @@ function Stat({ label, on, text }: { label: string; on: boolean; text: string })
       {label}:{text}
     </div>
   );
+}
+
+function UsagePanel({ usage }: { usage: UsageDay[] }) {
+  const days = usage.slice(-30);
+  const total = usage.reduce(
+    (sum, day) => ({
+      requests: sum.requests + day.chat.requests + day.embedding.requests,
+      tokens: sum.tokens + day.chat.inputTokens + day.chat.outputTokens + day.embedding.inputTokens + day.embedding.outputTokens,
+      cost: sum.cost + day.chat.estimatedCost + day.embedding.estimatedCost,
+    }),
+    { requests: 0, tokens: 0, cost: 0 }
+  );
+  const max = Math.max(1, ...days.map((day) => day.chat.inputTokens + day.chat.outputTokens + day.embedding.inputTokens + day.embedding.outputTokens));
+  return <div className="card"><h2 style={{ fontSize: 20 }}>RAG 用量（最近 30 天）</h2><p className="lead">实际 Token；费用为按当前配置单价计算的估算值，以百炼账单为准。</p><div className="status-strip"><div className="stat-pill">请求 {total.requests}</div><div className="stat-pill">Token {total.tokens.toLocaleString()}</div><div className="stat-pill">估算 ¥{total.cost.toFixed(4)}</div></div><svg viewBox="0 0 600 160" role="img" aria-label="最近三十天 Token 趋势" style={{ width: "100%", maxHeight: 180, marginTop: 16 }}><line x1="0" y1="150" x2="600" y2="150" stroke="currentColor" opacity=".2" />{days.map((day, index) => { const tokens = day.chat.inputTokens + day.chat.outputTokens + day.embedding.inputTokens + day.embedding.outputTokens; const width = 560 / Math.max(days.length, 1); const height = (tokens / max) * 130; return <rect key={day.date} x={20 + index * width} y={150 - height} width={Math.max(2, width - 3)} height={height} fill="currentColor" opacity=".65"><title>{day.date}: {tokens.toLocaleString()} Token，¥{(day.chat.estimatedCost + day.embedding.estimatedCost).toFixed(4)}</title></rect>; })}</svg><p className="lock">仅记录按日 chat / embedding 用量，不保存问题正文、文档正文或访客身份。</p></div>;
 }

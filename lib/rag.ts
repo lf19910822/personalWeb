@@ -1,40 +1,209 @@
 import fs from "fs/promises";
 import path from "path";
-import { embed, chat, hasLlm } from "./llm";
+import { buildRagSystemPrompt } from "@/prompts/rag-system";
+import { prepareMarkdownDocument, RagChildChunk, RagParentChunk } from "./rag-documents";
+import { chatWithUsage, embedWithUsage, hasLlm } from "./llm";
+import { recordRagUsage } from "./rag-usage";
+import { readJson, writeJson } from "./storage";
 
 /**
- * 语料库(内存态单例)。
- * - 进程启动时从 data/corpus.json 种子加载一次。
- * - 后台上传的文档只进内存(按需求:不落库、重启回退到种子),满足"AI 架构简单"的要求。
+ * 语料库(内存缓存 + 持久化索引)。
+ * - `rag/index.json` 保存文档分块与 embedding；配置 COS 时落到 COS，否则落到本地 data/objects/。
+ * - 没有持久化索引时，从 data/corpus.json 种子初始化，并在首次加载后尝试写入索引。
  */
 
-type Doc = { id: string; title: string; intro: string; chunks: string[] };
+type Doc = {
+  id: string;
+  title: string;
+  intro: string;
+  chunks: string[];
+  parents?: RagParentChunk[];
+  children?: RagChildChunk[];
+  updatedAt?: string;
+};
+type Chunk = { docId: string; title: string; text: string; parentId?: string; parentText?: string };
+type Embedding = { docId: string; text: string; vector: number[] };
+type PersistedRagIndex = {
+  version: 1;
+  embeddingModel: string | null;
+  docs: Doc[];
+  embeddings: Embedding[];
+  updatedAt: string;
+};
+
 export type DocMeta = { id: string; title: string; intro: string };
-type Chunk = { docId: string; title: string; text: string };
 export type Retrieved = { text: string; source: string };
+export type HistoryMessage = { role: "user" | "assistant"; content: string };
+
+export const RAG_INDEX_KEY = "rag/index.json";
+const SEED_CORPUS_PATH = path.join(process.cwd(), "data", "corpus.json");
 
 let docs: Doc[] = [];
 let vectors: Record<string, number[]> = {};
+let vectorModel: string | null = null;
 let loaded = false;
+
+function vectorKey(docId: string, text: string): string {
+  return `${docId}::${text}`;
+}
+
+function configuredEmbeddingModel(): string {
+  return process.env.QWEN_EMBED_MODEL || "text-embedding-v3";
+}
+
+function isDoc(value: unknown): value is Doc {
+  if (!value || typeof value !== "object") return false;
+  const doc = value as Doc;
+  return (
+    typeof doc.id === "string" &&
+    typeof doc.title === "string" &&
+    typeof doc.intro === "string" &&
+    Array.isArray(doc.chunks) &&
+    doc.chunks.every((chunk) => typeof chunk === "string")
+  );
+}
+
+function isPersistedIndex(value: unknown): value is PersistedRagIndex {
+  if (!value || typeof value !== "object") return false;
+  const index = value as PersistedRagIndex;
+  return (
+    index.version === 1 &&
+    (typeof index.embeddingModel === "string" || index.embeddingModel === null) &&
+    Array.isArray(index.docs) &&
+    index.docs.every(isDoc) &&
+    Array.isArray(index.embeddings) &&
+    index.embeddings.every(
+      (entry) =>
+        !!entry &&
+        typeof entry.docId === "string" &&
+        typeof entry.text === "string" &&
+        Array.isArray(entry.vector) &&
+        entry.vector.every((dimension) => typeof dimension === "number")
+    )
+  );
+}
+
+function allChunks(): Chunk[] {
+  const out: Chunk[] = [];
+  for (const doc of docs) {
+    if (doc.children?.length && doc.parents?.length) {
+      const parents = new Map(doc.parents.map((parent) => [parent.id, parent]));
+      for (const child of doc.children) {
+        const parent = parents.get(child.parentId);
+        if (parent) {
+          out.push({
+            docId: doc.id,
+            title: doc.title,
+            text: child.content,
+            parentId: parent.id,
+            parentText: parent.content,
+          });
+        }
+      }
+      continue;
+    }
+    for (const text of doc.chunks) out.push({ docId: doc.id, title: doc.title, text });
+  }
+  return out;
+}
+
+function makeIndex(): PersistedRagIndex {
+  const embeddings: Embedding[] = [];
+  for (const chunk of allChunks()) {
+    const vector = vectors[vectorKey(chunk.docId, chunk.text)];
+    if (vector) embeddings.push({ docId: chunk.docId, text: chunk.text, vector });
+  }
+  return {
+    version: 1,
+    embeddingModel: vectorModel,
+    docs,
+    embeddings,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function persistIndex(): Promise<void> {
+  await writeJson(RAG_INDEX_KEY, makeIndex());
+}
+
+async function loadSeedCorpus(): Promise<void> {
+  const raw = await fs.readFile(SEED_CORPUS_PATH, "utf8");
+  const seed = JSON.parse(raw);
+  docs = Array.isArray(seed.docs) ? seed.docs.filter(isDoc) : [];
+
+  // 兼容旧的本地向量缓存；下次成功写入时会迁移到 rag/index.json。
+  try {
+    const legacy = JSON.parse(
+      await fs.readFile(path.join(process.cwd(), "data", "vectors.json"), "utf8")
+    );
+    for (const entry of legacy.embeddings || []) {
+      if (
+        typeof entry?.docId === "string" &&
+        typeof entry?.text === "string" &&
+        Array.isArray(entry?.vector)
+      ) {
+        vectors[vectorKey(entry.docId, entry.text)] = entry.vector;
+      }
+    }
+  } catch {
+    // 无旧向量缓存时，首次真实检索会生成并持久化向量。
+  }
+}
 
 export async function ensureLoaded() {
   if (loaded) return;
-  const corpusPath = path.join(process.cwd(), "data", "corpus.json");
-  const raw = await fs.readFile(corpusPath, "utf8");
-  const json = JSON.parse(raw);
-  docs = json.docs || [];
-  try {
-    const v = JSON.parse(
-      await fs.readFile(path.join(process.cwd(), "data", "vectors.json"), "utf8")
+
+  const persisted = await readJson<unknown>(RAG_INDEX_KEY, null);
+  if (isPersistedIndex(persisted)) {
+    docs = persisted.docs;
+    vectorModel = persisted.embeddingModel;
+    vectors = Object.fromEntries(
+      persisted.embeddings.map((entry) => [vectorKey(entry.docId, entry.text), entry.vector])
     );
-    for (const e of v.embeddings || []) vectors[`${e.docId}::${e.text}`] = e.vector;
-  } catch {
-    // 无向量缓存则走关键词降级
+    loaded = true;
+    return;
   }
+
+  await loadSeedCorpus();
   loaded = true;
+
+  // 本地开发与已配置 COS 的首次启动都会建立可复用索引；无写权限时仍可用种子语料。
+  try {
+    await persistIndex();
+  } catch (error) {
+    console.warn("[rag] 初始化持久化索引失败，将仅使用内存缓存", error);
+  }
 }
 
-/** 后台上传:切分 + (配 Key 时)向量化 + 进内存 */
+/** 生成当前 embedding 模型缺少的向量；模型变更时会整库重新向量化。 */
+async function generateMissingEmbeddings(chunks: Chunk[]): Promise<boolean> {
+  if (!hasLlm()) return false;
+
+  const model = configuredEmbeddingModel();
+  const nextVectors = vectorModel === model ? { ...vectors } : {};
+  let changed = vectorModel !== model;
+  for (const chunk of chunks) {
+    const key = vectorKey(chunk.docId, chunk.text);
+    if (!nextVectors[key]) {
+      const result = await embedWithUsage(chunk.text);
+      nextVectors[key] = result.vector;
+      await recordRagUsage({
+        kind: "embedding",
+        model,
+        inputTokens: result.usage.inputTokens,
+      });
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    vectors = nextVectors;
+    vectorModel = model;
+  }
+  return changed;
+}
+
+/** 后台上传:切分 + 向量化 + 持久化。 */
 export async function addDoc(input: {
   title: string;
   intro: string;
@@ -44,29 +213,77 @@ export async function addDoc(input: {
   const id = "doc-" + Date.now().toString(36);
   const chunks = String(input.content)
     .split(/\n{2,}/)
-    .map((s) => s.trim())
+    .map((section) => section.trim())
     .filter(Boolean);
   docs.push({ id, title: input.title, intro: input.intro || "", chunks });
+
   if (hasLlm()) {
     try {
-      for (const c of chunks) vectors[`${id}::${c}`] = await embed(c);
-    } catch (e) {
-      console.error("[rag] embedding 失败", e);
+      await generateMissingEmbeddings(allChunks());
+    } catch (error) {
+      // 文档仍会持久化；后续检索会再次尝试为缺少的向量补齐 embedding。
+      console.error("[rag] embedding 失败，将在后续检索时重试", error);
     }
   }
+  await persistIndex();
+
   return { id, title: input.title, intro: input.intro, chunks };
+}
+
+export async function upsertMarkdownDocument(input: { fileName: string; content: string }) {
+  await ensureLoaded();
+  const prepared = prepareMarkdownDocument(input);
+  const next: Doc = {
+    id: prepared.documentId,
+    title: prepared.title,
+    intro: prepared.intro,
+    chunks: prepared.children.map((child) => child.content),
+    parents: prepared.parents,
+    children: prepared.children,
+    updatedAt: new Date().toISOString(),
+  };
+  const previous = docs;
+  docs = [...docs.filter((doc) => doc.id !== next.id), next];
+  try {
+    if (hasLlm()) await generateMissingEmbeddings(allChunks());
+    await persistIndex();
+    return prepared;
+  } catch (error) {
+    docs = previous;
+    throw error;
+  }
+}
+
+export async function removeDocument(documentId: string): Promise<boolean> {
+  await ensureLoaded();
+  const next = docs.filter((doc) => doc.id !== documentId);
+  if (next.length === docs.length) return false;
+  docs = next;
+  await persistIndex();
+  return true;
+}
+
+export async function listDocuments() {
+  await ensureLoaded();
+  return docs.map((doc) => ({
+    id: doc.id,
+    fileName: doc.id,
+    title: doc.title,
+    intro: doc.intro,
+    parentCount: doc.parents?.length || doc.chunks.length,
+    childCount: doc.children?.length || doc.chunks.length,
+    updatedAt: doc.updatedAt || "",
+  }));
 }
 
 export async function getCorpusMeta(): Promise<DocMeta[]> {
   await ensureLoaded();
-  return docs.map((d) => ({ id: d.id, title: d.title, intro: d.intro }));
+  return docs.map((doc) => ({ id: doc.id, title: doc.title, intro: doc.intro }));
 }
 
 export async function getChunks(): Promise<Chunk[]> {
   await ensureLoaded();
-  const out: Chunk[] = [];
-  for (const d of docs) for (const c of d.chunks) out.push({ docId: d.id, title: d.title, text: c });
-  return out;
+  return allChunks();
 }
 
 function cosine(a: number[], b: number[]): number {
@@ -85,25 +302,32 @@ function keywordScore(q: string, text: string): number {
   const terms = q
     .toLowerCase()
     .split(/[\s,，。、？?！!；;：:]+/)
-    .filter((t) => t.length > 0);
-  let s = 0;
+    .filter((term) => term.length > 0);
+  let score = 0;
   const lower = text.toLowerCase();
-  for (const t of terms) if (lower.includes(t)) s += 1;
-  return s;
+  for (const term of terms) if (lower.includes(term)) score += 1;
+  return score;
 }
 
 /** 检索 topK 相关分块(有 Key 走向量余弦,否则走关键词) */
-export async function retrieve(query: string, topK = 3): Promise<Retrieved[]> {
+export async function retrieve(query: string, topK = 6): Promise<Retrieved[]> {
   await ensureLoaded();
   const chunks = await getChunks();
   let scored: { chunk: Chunk; score: number }[] = [];
 
   if (hasLlm()) {
     try {
-      const vec = await embed(query);
+      if (await generateMissingEmbeddings(chunks)) await persistIndex();
+      const queryEmbedding = await embedWithUsage(query);
+      await recordRagUsage({
+        kind: "embedding",
+        model: configuredEmbeddingModel(),
+        inputTokens: queryEmbedding.usage.inputTokens,
+      });
+      const vector = queryEmbedding.vector;
       scored = chunks.map((chunk) => {
-        const v = vectors[`${chunk.docId}::${chunk.text}`];
-        const score = v ? cosine(vec, v) : keywordScore(query, chunk.text);
+        const storedVector = vectors[vectorKey(chunk.docId, chunk.text)];
+        const score = storedVector ? cosine(vector, storedVector) : keywordScore(query, chunk.text);
         return { chunk, score };
       });
     } catch {
@@ -114,24 +338,31 @@ export async function retrieve(query: string, topK = 3): Promise<Retrieved[]> {
   }
 
   scored.sort((a, b) => b.score - a.score);
-  const matched = scored.filter((s) => s.score > 0).slice(0, topK);
+  const matched = scored.filter((entry) => entry.score > 0).slice(0, topK);
   const use = matched.length ? matched : scored.slice(0, topK);
-  return use.map((s) => ({ text: s.chunk.text, source: s.chunk.title }));
+  const parents = new Map<string, Retrieved>();
+  for (const entry of use) {
+    const key = entry.chunk.parentId || `${entry.chunk.docId}::${entry.chunk.text}`;
+    if (!parents.has(key)) {
+      parents.set(key, { text: entry.chunk.parentText || entry.chunk.text, source: entry.chunk.title });
+    }
+  }
+  return [...parents.values()].slice(0, 2);
 }
 
 /** 生成回答(严格基于文档;无 Key 走降级模板) */
 export async function answer(
   question: string,
-  history: { role: string; content: string }[],
+  history: HistoryMessage[],
   retrieved: Retrieved[]
 ): Promise<{ text: string; sources: string[] }> {
-  const sources = [...new Set(retrieved.map((r) => r.source))];
+  const sources = [...new Set(retrieved.map((item) => item.source))];
   const context = retrieved
-    .map((r, i) => `[${i + 1}] (来源: ${r.source})\n${r.text}`)
+    .map((item, index) => `[${index + 1}] (来源: ${item.source})\n${item.text}`)
     .join("\n\n");
 
   if (!hasLlm()) {
-    const snippet = retrieved.map((r) => r.text).join(" ");
+    const snippet = retrieved.map((item) => item.text).join(" ");
     const text = `（演示模式:尚未配置大模型 API Key,以下为基于资料的原文摘录）\n\n${snippet.slice(
       0,
       320
@@ -141,21 +372,17 @@ export async function answer(
     return { text, sources };
   }
 
-  const system = `你是"张明"的个人 AI 助手,只依据下面【资料】回答访客问题。
-规则:
-1. 严格基于资料,不得编造资料之外的内容。
-2. 若资料中没有相关信息,明确说"这方面的资料里没有提到",不要猜测。
-3. 回答末尾用"📎 引用:来源文档名"标注引用来源(可多个)。
-4. 语气专业、简洁,像张明本人。
-
-【资料】
-${context}`;
-
   const messages = [
-    { role: "system", content: system },
-    ...history.slice(-6).map((h) => ({ role: h.role, content: h.content })),
+    { role: "system", content: buildRagSystemPrompt(context) },
+    ...history.slice(-4),
     { role: "user", content: question },
   ];
-  const text = await chat(messages);
-  return { text, sources };
+  const result = await chatWithUsage(messages);
+  await recordRagUsage({
+    kind: "chat",
+    model: process.env.QWEN_CHAT_MODEL || "qwen-plus",
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+  });
+  return { text: result.text, sources };
 }

@@ -31,9 +31,11 @@ export default function AiAssistant() {
   async function send() {
     const q = input.trim();
     if (!q || loading) return;
-    const history = messages
-      .filter((m) => m.role === "user" || m.role === "ai")
-      .map((m) => ({ role: m.role, content: m.content }));
+    // 只保留最近两轮(4 条消息),用于理解追问中的指代；每次提问仍会重新检索语料。
+    const history = messages.slice(-4).map((m) => ({
+      role: m.role === "ai" ? "assistant" : "user",
+      content: m.content,
+    }));
     const next = [...messages, { role: "user" as const, content: q }];
     setMessages(next);
     setInput("");
@@ -92,7 +94,7 @@ export default function AiAssistant() {
           </button>
         </div>
       </div>
-      <p className="memhint">🧠 带简单记忆窗口:会参考当前对话上下文作答。</p>
+      <p className="memhint">🧠 仅保留最近两轮对话，用于理解追问；每次都会重新检索资料。</p>
 
       <div className="doc-acc">
         <details className="doc-drop">

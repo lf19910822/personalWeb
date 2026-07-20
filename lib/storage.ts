@@ -11,7 +11,7 @@ import {
  * 统一对象存储抽象层。
  * - 配置了腾讯云 COS(S3 兼容)环境变量时,对象落到 COS 桶(国内访问快、持久化)。
  * - 未配置时自动降级到本地 data/objects/ 目录(开发期零依赖即可运行)。
- * 简历 PDF、访客记录、留言均经此层持久化,部署到 Serverless 也不丢。
+ * 简历 PDF、访客记录、留言与 RAG 索引均经此层持久化；部署到 Serverless 时请配置 COS。
  */
 
 type CosConf = { client: S3Client; bucket: string } | null;
@@ -31,7 +31,8 @@ function getCos(): CosConf {
   const client = new S3Client({
     endpoint,
     region,
-    forcePathStyle: true, // COS S3 兼容需要 path-style
+    // 腾讯云 COS 要求 virtual-hosted-style：<bucket>.cos.<region>.myqcloud.com。
+    forcePathStyle: false,
     credentials: { accessKeyId: secretId, secretAccessKey: secretKey },
   });
   _cos = { client, bucket };
