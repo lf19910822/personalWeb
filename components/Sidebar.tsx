@@ -67,7 +67,6 @@ export default function Sidebar() {
           <a href="/api/resume" target="_blank" rel="noopener">
             简历
           </a>
-          <a href="/admin">后台</a>
         </div>
         <button className="theme-btn" onClick={toggle} aria-label="切换明暗主题">
           {theme === "dark" ? "☀ 浅色" : "🌙 深色"}
