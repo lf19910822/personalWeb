@@ -31,6 +31,7 @@ export default function AiAssistant() {
   const [loading, setLoading] = useState(false);
   const [docs, setDocs] = useState<DocMeta[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
+  const shouldFollowLatestRef = useRef(true);
 
   useEffect(() => {
     fetch("/api/corpus")
@@ -40,8 +41,16 @@ export default function AiAssistant() {
   }, []);
 
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    if (logRef.current && shouldFollowLatestRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
   }, [messages, loading]);
+
+  function updateFollowLatest() {
+    const log = logRef.current;
+    if (!log) return;
+    shouldFollowLatestRef.current = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+  }
 
   async function send() {
     const q = input.trim();
@@ -52,6 +61,7 @@ export default function AiAssistant() {
       content: m.content,
     }));
     const next = [...messages, { role: "user" as const, content: q }];
+    shouldFollowLatestRef.current = true;
     setMessages([...next, { role: "ai", content: "" }]);
     setInput("");
     setLoading(true);
@@ -159,7 +169,7 @@ export default function AiAssistant() {
       <h2>问问关于我的任何事</h2>
       <p className="lead">基于我的文档回答,答不上来的问题会如实告知,并附上引用来源。</p>
       <div className="chat">
-        <div className="chat-log" ref={logRef}>
+        <div className="chat-log" ref={logRef} onScroll={updateFollowLatest}>
           {messages.map((m, i) => (
             <div key={i} className={`bubble ${m.role === "user" ? "b-user" : "b-ai"}`}>
               {m.role === "ai" ? (

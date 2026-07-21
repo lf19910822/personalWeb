@@ -369,9 +369,7 @@ export async function answer(
     const text = `（演示模式:尚未配置大模型 API Key,以下为基于资料的原文摘录）\n\n${snippet.slice(
       0,
       320
-    )}…\n\n引用来源:${sources.join(
-      "、"
-    )}。配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`;
+    )}…\n\n配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`;
     return { text, sources };
   }
 
@@ -409,7 +407,7 @@ export async function* answerStream(
       text: `（演示模式:尚未配置大模型 API Key,以下为基于资料的原文摘录）\n\n${snippet.slice(
         0,
         320
-      )}…\n\n引用来源:${sources.join("、")}。配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`,
+      )}…\n\n配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`,
     };
     return;
   }
