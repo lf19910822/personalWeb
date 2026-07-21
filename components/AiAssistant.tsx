@@ -1,8 +1,23 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import MarkdownAnswer from "./MarkdownAnswer";
 
 type Msg = { role: "user" | "ai"; content: string; sources?: string[] };
 type DocMeta = { id: string; title: string; intro: string };
+const TYPEWRITER_INTERVAL_MS = 18;
+
+/** 按用户可见字符拆分，避免把 emoji 或组合字符拆成多个打字步骤。 */
+export function splitTypingUnits(text: string): string[] {
+  if (typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter("zh-CN", { granularity: "grapheme" });
+    return Array.from(segmenter.segment(text), ({ segment }) => segment);
+  }
+  return Array.from(text);
+}
+
+function typingDelay(unit: string): number {
+  return /[。！？!?；;：:]/u.test(unit) ? 72 : TYPEWRITER_INTERVAL_MS;
+}
 
 export default function AiAssistant() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -37,24 +52,100 @@ export default function AiAssistant() {
       content: m.content,
     }));
     const next = [...messages, { role: "user" as const, content: q }];
-    setMessages(next);
+    setMessages([...next, { role: "ai", content: "" }]);
     setInput("");
     setLoading(true);
+    let cancelTyping = () => {};
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q, history }),
       });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setMessages([
-        ...next,
-        { role: "ai", content: data.answer, sources: data.sources || [] },
-      ]);
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "生成回答失败");
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const updateAnswer = (update: Partial<Msg>, append = false) => {
+        setMessages((current) => {
+          const last = current[current.length - 1];
+          if (!last || last.role !== "ai") return current;
+          return [
+            ...current.slice(0, -1),
+            { ...last, ...update, content: append ? last.content + (update.content || "") : update.content ?? last.content },
+          ];
+        });
+      };
+      const typeQueue: string[] = [];
+      let typingTimer: number | undefined;
+      let streamFinished = false;
+      let typingCancelled = false;
+      cancelTyping = () => {
+        typingCancelled = true;
+        if (typingTimer) window.clearTimeout(typingTimer);
+      };
+      let resolveTypingDrained: () => void = () => {};
+      const typingDrained = new Promise<void>((resolve) => {
+        resolveTypingDrained = resolve;
+      });
+      const finishTypingIfDrained = () => {
+        if (streamFinished && !typingTimer && typeQueue.length === 0) resolveTypingDrained();
+      };
+      const writeNextUnit = () => {
+        if (typingCancelled) return;
+        const unit = typeQueue.shift();
+        if (!unit) {
+          typingTimer = undefined;
+          finishTypingIfDrained();
+          return;
+        }
+        updateAnswer({ content: unit }, true);
+        typingTimer = window.setTimeout(writeNextUnit, typingDelay(unit));
+      };
+      const enqueueTyping = (text: string) => {
+        typeQueue.push(...splitTypingUnits(text));
+        if (!typingTimer) writeNextUnit();
+      };
+      const consumeEvents = () => {
+        buffer = buffer.replace(/\r\n/g, "\n");
+        while (true) {
+          const boundary = buffer.indexOf("\n\n");
+          if (boundary < 0) return;
+          const rawEvent = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const event = rawEvent.match(/^event: (.+)$/m)?.[1] || "message";
+          const data = rawEvent
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n");
+          if (!data) continue;
+          const payload = JSON.parse(data);
+          if (event === "sources") updateAnswer({ sources: payload.sources || [] });
+          if (event === "delta") enqueueTyping(payload.text || "");
+          if (event === "error") throw new Error(payload.error || "生成回答失败");
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          consumeEvents();
+        }
+        if (done) break;
+      }
+      buffer += decoder.decode();
+      consumeEvents();
+      streamFinished = true;
+      finishTypingIfDrained();
+      await typingDrained;
     } catch (e: any) {
-      setMessages([
-        ...next,
+      cancelTyping();
+      setMessages((current) => [
+        ...current.slice(0, -1),
         { role: "ai", content: "抱歉,暂时连不上(演示模式或网络问题)。请稍后再试。" },
       ]);
     } finally {
@@ -71,13 +162,17 @@ export default function AiAssistant() {
         <div className="chat-log" ref={logRef}>
           {messages.map((m, i) => (
             <div key={i} className={`bubble ${m.role === "user" ? "b-user" : "b-ai"}`}>
-              {m.content}
+              {m.role === "ai" ? (
+                <>
+                  {m.content ? <MarkdownAnswer content={m.content} /> : <span className="streaming-status">正在检索资料并生成回答…</span>}
+                  {loading && i === messages.length - 1 && m.content && <span className="streaming-cursor" aria-hidden="true" />}
+                </>
+              ) : m.content}
               {m.sources && m.sources.length > 0 && (
                 <div className="cite">📎 引用:{m.sources.join("、")}</div>
               )}
             </div>
           ))}
-          {loading && <div className="bubble b-ai">正在检索资料…</div>}
         </div>
         <div className="chat-input">
           <input

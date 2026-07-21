@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { buildRagSystemPrompt } from "@/prompts/rag-system";
 import { prepareMarkdownDocument, RagChildChunk, RagParentChunk } from "./rag-documents";
-import { chatWithUsage, embedWithUsage, hasLlm } from "./llm";
+import { chatStreamWithUsage, chatWithUsage, embedWithUsage, hasLlm } from "./llm";
 import { recordRagUsage } from "./rag-usage";
 import { readJson, writeJson } from "./storage";
 
@@ -34,6 +34,9 @@ type PersistedRagIndex = {
 export type DocMeta = { id: string; title: string; intro: string };
 export type Retrieved = { text: string; source: string };
 export type HistoryMessage = { role: "user" | "assistant"; content: string };
+export type AnswerStreamEvent =
+  | { type: "sources"; sources: string[] }
+  | { type: "delta"; text: string };
 
 export const RAG_INDEX_KEY = "rag/index.json";
 const SEED_CORPUS_PATH = path.join(process.cwd(), "data", "corpus.json");
@@ -385,4 +388,47 @@ export async function answer(
     outputTokens: result.usage.outputTokens,
   });
   return { text: result.text, sources };
+}
+
+/** 先发出引用来源，再逐段生成回答；降级模式仍以单个文本块兼容流式协议。 */
+export async function* answerStream(
+  question: string,
+  history: HistoryMessage[],
+  retrieved: Retrieved[]
+): AsyncGenerator<AnswerStreamEvent> {
+  const sources = [...new Set(retrieved.map((item) => item.source))];
+  const context = retrieved
+    .map((item, index) => `[${index + 1}] (来源: ${item.source})\n${item.text}`)
+    .join("\n\n");
+  yield { type: "sources", sources };
+
+  if (!hasLlm()) {
+    const snippet = retrieved.map((item) => item.text).join(" ");
+    yield {
+      type: "delta",
+      text: `（演示模式:尚未配置大模型 API Key,以下为基于资料的原文摘录）\n\n${snippet.slice(
+        0,
+        320
+      )}…\n\n引用来源:${sources.join("、")}。配置 QWEN_API_KEY 后,AI 会基于文档精准作答并拒答资料外的问题。`,
+    };
+    return;
+  }
+
+  const messages = [
+    { role: "system", content: buildRagSystemPrompt(context) },
+    ...history.slice(-4),
+    { role: "user", content: question },
+  ];
+  for await (const event of chatStreamWithUsage(messages)) {
+    if (event.type === "delta") {
+      yield event;
+      continue;
+    }
+    await recordRagUsage({
+      kind: "chat",
+      model: process.env.QWEN_CHAT_MODEL || "qwen-plus",
+      inputTokens: event.usage.inputTokens,
+      outputTokens: event.usage.outputTokens,
+    });
+  }
 }

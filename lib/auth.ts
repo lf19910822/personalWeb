@@ -10,14 +10,20 @@ function sign(user: string): string {
 
 /** 生成登录 token(user 签名) */
 export function makeToken(user: string): string {
-  return `${user}.${sign(user)}`;
+  return `v1.${Buffer.from(user, "utf8").toString("base64url")}.${sign(user)}`;
 }
 
 /** 校验 token */
 export function verifyToken(token?: string): boolean {
   if (!token) return false;
-  const [user, sig] = token.split(".");
-  if (!user || !sig) return false;
+  const [version, encodedUser, sig] = token.split(".");
+  if (version !== "v1" || !encodedUser || !sig) return false;
+  let user = "";
+  try {
+    user = Buffer.from(encodedUser, "base64url").toString("utf8");
+  } catch {
+    return false;
+  }
   return sign(user) === sig && user === ADMIN_USER;
 }
 

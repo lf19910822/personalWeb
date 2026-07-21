@@ -1,5 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
+import { RagPreviewTable, type RagPreview } from "./rag-preview-table";
+import { UsageChart, type UsageDay } from "./usage-chart";
 
 type Message = {
   id: string;
@@ -31,9 +33,6 @@ type Status = {
   visitorCount: number;
 };
 type RagDocument = { id: string; fileName: string; title: string; intro: string; parentCount: number; childCount: number; updatedAt: string };
-type RagPreview = { documentId: string; title: string; intro: string; parentCount: number; childCount: number; estimatedEmbeddingTokens: number; estimatedEmbeddingCost: number };
-type UsageEntry = { requests: number; inputTokens: number; outputTokens: number; estimatedCost: number };
-type UsageDay = { date: string; chat: UsageEntry; embedding: UsageEntry };
 
 const TABS = [
   { id: "overview", label: "概览" },
@@ -47,6 +46,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function Admin() {
   const [loggedIn, setLoggedIn] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
   const [loginErr, setLoginErr] = useState("");
@@ -68,6 +68,24 @@ export default function Admin() {
   // 留言 / 访客
   const [messages, setMessages] = useState<Message[]>([]);
   const [visitors, setVisitors] = useState<Visitor[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/status", { credentials: "include" })
+      .then(async (res) => {
+        if (res.ok && active) {
+          setStatus(await res.json());
+          setLoggedIn(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setAuthChecked(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (loggedIn) {
@@ -189,6 +207,10 @@ export default function Admin() {
     setPass("");
   }
 
+  if (!authChecked) {
+    return <div className="admin"><p className="lead">正在恢复登录状态…</p></div>;
+  }
+
   if (!loggedIn) {
     return (
       <div className="admin">
@@ -287,7 +309,7 @@ export default function Admin() {
               <div className={uploadMsg.startsWith("✓") ? "ok" : "err"}>{uploadMsg}</div>
             )}
           </form>
-          {preview.length > 0 && <div className="m-item">{preview.map((item) => <div key={item.documentId}>{item.documentId} · 父块 {item.parentCount} · 子块 {item.childCount} · 预计 {item.estimatedEmbeddingTokens} Token / ¥{item.estimatedEmbeddingCost.toFixed(4)}</div>)}</div>}
+          {preview.length > 0 && <RagPreviewTable previews={preview} />}
           <h3 style={{ marginTop: 28 }}>已持久化文档</h3>
           {documents.map((doc) => <div className="m-item" key={doc.id}><div className="m-meta">{doc.fileName} · 父块 {doc.parentCount} · 子块 {doc.childCount}{doc.updatedAt && ` · ${new Date(doc.updatedAt).toLocaleString("zh-CN")}`}</div><div>{doc.title} · {doc.intro}</div><button className="theme-btn" onClick={() => deleteDocument(doc.id)}>永久删除</button></div>)}
         </div>
@@ -372,7 +394,6 @@ function Stat({ label, on, text }: { label: string; on: boolean; text: string })
 }
 
 function UsagePanel({ usage }: { usage: UsageDay[] }) {
-  const days = usage.slice(-30);
   const total = usage.reduce(
     (sum, day) => ({
       requests: sum.requests + day.chat.requests + day.embedding.requests,
@@ -381,6 +402,5 @@ function UsagePanel({ usage }: { usage: UsageDay[] }) {
     }),
     { requests: 0, tokens: 0, cost: 0 }
   );
-  const max = Math.max(1, ...days.map((day) => day.chat.inputTokens + day.chat.outputTokens + day.embedding.inputTokens + day.embedding.outputTokens));
-  return <div className="card"><h2 style={{ fontSize: 20 }}>RAG 用量（最近 30 天）</h2><p className="lead">实际 Token；费用为按当前配置单价计算的估算值，以百炼账单为准。</p><div className="status-strip"><div className="stat-pill">请求 {total.requests}</div><div className="stat-pill">Token {total.tokens.toLocaleString()}</div><div className="stat-pill">估算 ¥{total.cost.toFixed(4)}</div></div><svg viewBox="0 0 600 160" role="img" aria-label="最近三十天 Token 趋势" style={{ width: "100%", maxHeight: 180, marginTop: 16 }}><line x1="0" y1="150" x2="600" y2="150" stroke="currentColor" opacity=".2" />{days.map((day, index) => { const tokens = day.chat.inputTokens + day.chat.outputTokens + day.embedding.inputTokens + day.embedding.outputTokens; const width = 560 / Math.max(days.length, 1); const height = (tokens / max) * 130; return <rect key={day.date} x={20 + index * width} y={150 - height} width={Math.max(2, width - 3)} height={height} fill="currentColor" opacity=".65"><title>{day.date}: {tokens.toLocaleString()} Token，¥{(day.chat.estimatedCost + day.embedding.estimatedCost).toFixed(4)}</title></rect>; })}</svg><p className="lock">仅记录按日 chat / embedding 用量，不保存问题正文、文档正文或访客身份。</p></div>;
+  return <div className="card"><h2 style={{ fontSize: 20 }}>RAG 用量（按日趋势）</h2><p className="lead">实际 Token；费用为按当前配置单价计算的估算值，以百炼账单为准。</p><div className="status-strip"><div className="stat-pill">累计请求 {total.requests}</div><div className="stat-pill">累计 Token {total.tokens.toLocaleString()}</div><div className="stat-pill">累计估算 ¥{total.cost.toFixed(4)}</div></div><UsageChart usage={usage} /><p className="lock">仅记录按日 chat / embedding 用量，不保存问题正文、文档正文或访客身份。</p></div>;
 }
