@@ -15,7 +15,7 @@ describe("AI 助手流式回答", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: string) => {
-        if (input === "/api/corpus") return Promise.resolve(new Response(JSON.stringify({ docs: [] })));
+        if (input === "/api/corpus") return Promise.resolve(new Response(JSON.stringify({ docs: [], model: { displayName: "通义千问 · qwen-plus" } })));
         if (input === "/api/chat") return Promise.resolve(response);
         return Promise.resolve(new Response(null, { status: 404 }));
       })
@@ -32,6 +32,7 @@ describe("AI 助手流式回答", () => {
     expect(screen.queryByRole("heading", { level: 2, name: "项目" })).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { level: 2, name: "项目" })).toBeInTheDocument();
     expect(screen.getByText("📎 引用:项目复盘")).toBeInTheDocument();
+    expect(screen.getByText("🤖 当前回答模型：通义千问 · qwen-plus")).toBeInTheDocument();
 
     await act(async () => {
       controller!.enqueue(encoder.encode('event: delta\ndata: {"text":"成果\\n\\n- 首屏优化"}\n\nevent: done\ndata: {}\n\n'));

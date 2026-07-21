@@ -26,6 +26,7 @@ type Visitor = {
 };
 type Status = {
   llm: boolean;
+  model?: { provider: "qwen" | "demo"; displayName: string };
   mail: boolean;
   storage: string;
   docCount: number;
@@ -35,14 +36,18 @@ type Status = {
 type RagDocument = { id: string; fileName: string; title: string; intro: string; parentCount: number; childCount: number; updatedAt: string };
 
 const TABS = [
-  { id: "overview", label: "概览" },
   { id: "docs", label: "语料" },
-  { id: "usage", label: "RAG 用量" },
+  { id: "ai", label: "AI 配置" },
   { id: "resume", label: "简历" },
   { id: "messages", label: "留言" },
   { id: "visitors", label: "访客" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
+const MODEL_PROVIDER_OPTIONS = [
+  { id: "qwen", label: "通义千问（当前已支持）" },
+  { id: "deepseek", label: "DeepSeek（预留）" },
+  { id: "other", label: "其他 OpenAI 兼容模型（预留）" },
+] as const;
 
 export default function Admin() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -51,8 +56,9 @@ export default function Admin() {
   const [pass, setPass] = useState("");
   const [loginErr, setLoginErr] = useState("");
 
-  const [tab, setTab] = useState<TabId>("overview");
+  const [tab, setTab] = useState<TabId>("docs");
   const [status, setStatus] = useState<Status | null>(null);
+  const [selectedModelProvider, setSelectedModelProvider] = useState<(typeof MODEL_PROVIDER_OPTIONS)[number]["id"]>("qwen");
 
   // 语料
   const [files, setFiles] = useState<File[]>([]);
@@ -260,6 +266,7 @@ export default function Admin() {
       {status && (
         <div className="status-strip">
           <Stat label="AI/RAG" on={status.llm} text={status.llm ? "已接通" : "降级模式"} />
+          <div className="stat-pill">模型:{status.model?.displayName || "正在读取"}</div>
           <Stat label="邮件通知" on={status.mail} text={status.mail ? "已接通" : "控制台"} />
           <Stat label="存储" on={status.storage === "cos"} text={status.storage === "cos" ? "腾讯云 COS" : "本地文件"} />
           <div className="stat-pill">
@@ -279,16 +286,6 @@ export default function Admin() {
           </button>
         ))}
       </div>
-
-      {tab === "overview" && (
-        <div className="card">
-          <h2 style={{ fontSize: 20 }}>站点状态</h2>
-          <p className="lead" style={{ fontSize: 15 }}>
-            下方为当前运行状态。AI/RAG 与邮件需配置对应 API Key 才会启用真实能力;
-            存储为腾讯云 COS 时访客与简历持久化,否则仅本地文件(重启清空)。
-          </p>
-        </div>
-      )}
 
       {tab === "docs" && (
         <div className="card">
@@ -315,7 +312,7 @@ export default function Admin() {
         </div>
       )}
 
-      {tab === "usage" && <UsagePanel usage={usage} />}
+      {tab === "ai" && <AiConfigPanel usage={usage} status={status} selectedProvider={selectedModelProvider} onProviderChange={setSelectedModelProvider} />}
 
       {tab === "resume" && (
         <div className="card">
@@ -393,7 +390,17 @@ function Stat({ label, on, text }: { label: string; on: boolean; text: string })
   );
 }
 
-function UsagePanel({ usage }: { usage: UsageDay[] }) {
+function AiConfigPanel({
+  usage,
+  status,
+  selectedProvider,
+  onProviderChange,
+}: {
+  usage: UsageDay[];
+  status: Status | null;
+  selectedProvider: (typeof MODEL_PROVIDER_OPTIONS)[number]["id"];
+  onProviderChange: (provider: (typeof MODEL_PROVIDER_OPTIONS)[number]["id"]) => void;
+}) {
   const total = usage.reduce(
     (sum, day) => ({
       requests: sum.requests + day.chat.requests + day.embedding.requests,
@@ -402,5 +409,47 @@ function UsagePanel({ usage }: { usage: UsageDay[] }) {
     }),
     { requests: 0, tokens: 0, cost: 0 }
   );
-  return <div className="card"><h2 style={{ fontSize: 20 }}>RAG 用量（按日趋势）</h2><p className="lead">实际 Token；费用为按当前配置单价计算的估算值，以百炼账单为准。</p><div className="status-strip"><div className="stat-pill">累计请求 {total.requests}</div><div className="stat-pill">累计 Token {total.tokens.toLocaleString()}</div><div className="stat-pill">累计估算 ¥{total.cost.toFixed(4)}</div></div><UsageChart usage={usage} /><p className="lock">仅记录按日 chat / embedding 用量，不保存问题正文、文档正文或访客身份。</p></div>;
+  return (
+    <div className="card ai-config-card">
+      <div className="ai-config-head">
+        <div>
+          <h2>AI 配置</h2>
+          <p className="lead">查看当前实际模型，并为后续接入更多提供商预设选择。</p>
+        </div>
+        <span className={status?.llm ? "ai-config-state is-on" : "ai-config-state"}>{status?.llm ? "已接通" : "演示模式"}</span>
+      </div>
+      <div className="current-model-card">
+        <span className="current-model-icon" aria-hidden="true">✦</span>
+        <div>
+          <span>当前实际模型</span>
+          <strong>{status?.model?.displayName || "正在读取"}</strong>
+        </div>
+        <span className={status?.llm ? "dot on" : "dot"} aria-label={status?.llm ? "模型已接通" : "模型未接通"} />
+      </div>
+      <div className="field model-provider-field">
+        <label htmlFor="model-provider">聊天模型提供商</label>
+        <div className="model-select-wrap">
+          <select
+            id="model-provider"
+            className="model-select"
+            value={selectedProvider}
+            onChange={(event) => onProviderChange(event.target.value as typeof selectedProvider)}
+          >
+            {MODEL_PROVIDER_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+          <span className="model-select-chevron" aria-hidden="true">⌄</span>
+        </div>
+      </div>
+      <p className="lock model-selection-note">
+        此选择暂不修改环境变量或真实调用。{selectedProvider === "qwen" ? "DeepSeek 等提供商接入后可在这里正式切换。" : "所选提供商尚未接入，当前调用不会改变。"}
+      </p>
+
+      <div className="ai-config-divider" />
+      <h3>AI 用量</h3>
+      <p className="lead">实际 Token；费用为按当前配置单价计算的估算值，以百炼账单为准。</p>
+      <div className="status-strip"><div className="stat-pill">累计请求 {total.requests}</div><div className="stat-pill">累计 Token {total.tokens.toLocaleString()}</div><div className="stat-pill">累计估算 ¥{total.cost.toFixed(4)}</div></div>
+      <UsageChart usage={usage} />
+      <p className="lock">仅记录按日 chat / embedding 用量，不保存问题正文、文档正文或访客身份。</p>
+    </div>
+  );
 }

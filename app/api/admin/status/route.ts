@@ -5,6 +5,7 @@ import { getCorpusMeta } from "@/lib/rag";
 import { listMessages } from "@/lib/store";
 import { listVisitors } from "@/lib/visitors";
 import { storageBackend } from "@/lib/storage";
+import { currentChatModel } from "@/lib/model-status";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,6 +21,7 @@ export async function GET() {
   ]);
   return NextResponse.json({
     llm: !!process.env.QWEN_API_KEY,
+    model: currentChatModel(),
     mail: !!process.env.RESEND_API_KEY,
     storage: storageBackend(),
     docCount: docs.length,

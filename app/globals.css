@@ -409,7 +409,8 @@ label {
   font-weight: 500;
 }
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -421,7 +422,8 @@ textarea {
   transition: border-color 0.25s, box-shadow 0.25s;
 }
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -912,6 +914,107 @@ textarea:focus {
 }
 .preview-intro {
   line-height: 1.45;
+}
+.ai-config-card h2,
+.ai-config-card h3 {
+  font-size: 20px;
+}
+.ai-config-card h3 {
+  margin-bottom: 4px;
+}
+.ai-config-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.ai-config-state {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ai-config-state.is-on {
+  border-color: color-mix(in srgb, #2e9e5b 40%, var(--line));
+  color: #2e9e5b;
+  background: color-mix(in srgb, #2e9e5b 10%, var(--surface));
+}
+.current-model-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-soft), var(--surface));
+}
+.current-model-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 17px;
+}
+.current-model-card div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.current-model-card span:not(.current-model-icon):not(.dot) {
+  color: var(--muted);
+  font-size: 12px;
+}
+.current-model-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+}
+.current-model-card .dot {
+  margin-left: auto;
+}
+.model-provider-field {
+  margin-top: 18px;
+}
+.model-select-wrap {
+  position: relative;
+}
+.model-select {
+  width: 100%;
+  appearance: none;
+  cursor: pointer;
+  padding-right: 42px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-weight: 600;
+}
+.model-select:hover {
+  border-color: var(--accent);
+}
+.model-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  color: var(--accent);
+  font-size: 19px;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-58%);
+}
+.model-selection-note {
+  margin-top: 8px;
+}
+.ai-config-divider {
+  height: 1px;
+  margin: 28px 0 22px;
+  background: var(--line);
 }
 .usage-chart {
   margin-top: 22px;

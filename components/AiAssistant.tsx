@@ -4,6 +4,7 @@ import MarkdownAnswer from "./MarkdownAnswer";
 
 type Msg = { role: "user" | "ai"; content: string; sources?: string[] };
 type DocMeta = { id: string; title: string; intro: string };
+type ModelStatus = { displayName: string };
 const TYPEWRITER_INTERVAL_MS = 18;
 
 /** 按用户可见字符拆分，避免把 emoji 或组合字符拆成多个打字步骤。 */
@@ -30,13 +31,17 @@ export default function AiAssistant() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [docs, setDocs] = useState<DocMeta[]>([]);
+  const [model, setModel] = useState<ModelStatus | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const shouldFollowLatestRef = useRef(true);
 
   useEffect(() => {
     fetch("/api/corpus")
       .then((r) => r.json())
-      .then((d) => setDocs(d.docs || []))
+      .then((d) => {
+        setDocs(d.docs || []);
+        setModel(d.model || null);
+      })
       .catch(() => {});
   }, []);
 
@@ -200,6 +205,7 @@ export default function AiAssistant() {
         </div>
       </div>
       <p className="memhint">🧠 仅保留最近两轮对话，用于理解追问；每次都会重新检索资料。</p>
+      <p className="memhint">🤖 当前回答模型：{model?.displayName || "正在读取模型状态…"}</p>
 
       <div className="doc-acc">
         <details className="doc-drop">
