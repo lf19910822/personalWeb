@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 const NAV = [
   { id: "hero", idx: "01", label: "首页" },
   { id: "about", idx: "02", label: "个人信息" },
-  { id: "ai", idx: "03", label: "AI 助手" },
-  { id: "msg", idx: "04", label: "留言" },
+  { id: "projects", idx: "03", label: "项目案例" },
+  { id: "ai", idx: "04", label: "AI 助手" },
+  { id: "msg", idx: "05", label: "留言" },
 ];
 
 export default function Sidebar() {

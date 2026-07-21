@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { RagPreviewTable, type RagPreview } from "./rag-preview-table";
 import { UsageChart, type UsageDay } from "./usage-chart";
+import type { ProjectCard, ProjectStatus } from "@/lib/project-cards";
 
 type Message = {
   id: string;
@@ -34,9 +35,22 @@ type Status = {
   visitorCount: number;
 };
 type RagDocument = { id: string; fileName: string; title: string; intro: string; parentCount: number; childCount: number; updatedAt: string };
+type ProjectForm = {
+  id?: string;
+  title: string;
+  summary: string;
+  background: string;
+  role: string;
+  solutions: string;
+  results: string;
+  tags: string;
+  sortOrder: string;
+  relatedDocumentId: string;
+};
 
 const TABS = [
   { id: "docs", label: "语料" },
+  { id: "projects", label: "项目" },
   { id: "ai", label: "AI 配置" },
   { id: "resume", label: "简历" },
   { id: "messages", label: "留言" },
@@ -48,6 +62,36 @@ const MODEL_PROVIDER_OPTIONS = [
   { id: "deepseek", label: "DeepSeek（预留）" },
   { id: "other", label: "其他 OpenAI 兼容模型（预留）" },
 ] as const;
+const EMPTY_PROJECT_FORM: ProjectForm = {
+  title: "",
+  summary: "",
+  background: "",
+  role: "",
+  solutions: "",
+  results: "",
+  tags: "",
+  sortOrder: "0",
+  relatedDocumentId: "",
+};
+
+function lines(value: string): string[] {
+  return value.split("\n").map((item) => item.trim()).filter(Boolean);
+}
+
+function formOfProject(project: ProjectCard): ProjectForm {
+  return {
+    id: project.id,
+    title: project.title,
+    summary: project.summary,
+    background: project.background,
+    role: project.role,
+    solutions: project.solutions.join("\n"),
+    results: project.results.join("\n"),
+    tags: project.tags.join("\n"),
+    sortOrder: String(project.sortOrder),
+    relatedDocumentId: project.relatedDocumentId || "",
+  };
+}
 
 export default function Admin() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -66,6 +110,9 @@ export default function Admin() {
   const [documents, setDocuments] = useState<RagDocument[]>([]);
   const [usage, setUsage] = useState<UsageDay[]>([]);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [projects, setProjects] = useState<ProjectCard[]>([]);
+  const [projectForm, setProjectForm] = useState<ProjectForm>(EMPTY_PROJECT_FORM);
+  const [projectMsg, setProjectMsg] = useState("");
 
   // 简历
   const [resumeExists, setResumeExists] = useState(false);
@@ -98,6 +145,7 @@ export default function Admin() {
       loadStatus();
       loadMessages();
       loadDocuments();
+      loadProjects();
       loadUsage();
     }
   }, [loggedIn]);
@@ -147,6 +195,10 @@ export default function Admin() {
     const res = await fetch("/api/admin/usage", { credentials: "include" });
     if (res.ok) setUsage((await res.json()).days || []);
   }
+  async function loadProjects() {
+    const res = await fetch("/api/admin/projects", { credentials: "include" });
+    if (res.ok) setProjects((await res.json()).projects || []);
+  }
 
   async function doUpload(e: React.FormEvent) {
     e.preventDefault();
@@ -178,6 +230,64 @@ export default function Admin() {
     if (!window.confirm("永久删除这份语料及其向量？")) return;
     const res = await fetch(`/api/admin/docs?id=${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
     if (res.ok) { await loadDocuments(); await loadStatus(); }
+  }
+
+  function updateProjectForm(field: keyof ProjectForm, value: string) {
+    setProjectForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function projectPayload(status: ProjectStatus) {
+    return {
+      ...projectForm,
+      status,
+      solutions: lines(projectForm.solutions),
+      results: lines(projectForm.results),
+      tags: lines(projectForm.tags),
+      sortOrder: Number(projectForm.sortOrder),
+      relatedDocumentId: projectForm.relatedDocumentId,
+    };
+  }
+
+  async function saveProject(status: ProjectStatus) {
+    setProjectMsg("");
+    const editing = Boolean(projectForm.id);
+    const res = await fetch("/api/admin/projects", {
+      method: editing ? "PUT" : "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(projectPayload(status)),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setProjectMsg("✗ " + (data.error || "保存项目失败"));
+      return;
+    }
+    setProjectForm(formOfProject(data.project));
+    setProjectMsg(status === "published" ? "✓ 项目已发布到访问页" : "✓ 草稿已保存，访问页暂不可见");
+    await loadProjects();
+  }
+
+  async function unpublishProject(project: ProjectCard) {
+    const res = await fetch("/api/admin/projects", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...project, status: "draft" }),
+    });
+    if (res.ok) {
+      setProjectMsg("✓ 项目已取消发布");
+      await loadProjects();
+    }
+  }
+
+  async function deleteProject(project: ProjectCard) {
+    if (!window.confirm(`永久删除「${project.title}」吗？`)) return;
+    const res = await fetch(`/api/admin/projects?id=${encodeURIComponent(project.id)}`, { method: "DELETE", credentials: "include" });
+    if (res.ok) {
+      if (projectForm.id === project.id) setProjectForm(EMPTY_PROJECT_FORM);
+      setProjectMsg("✓ 项目已永久删除");
+      await loadProjects();
+    }
   }
 
   async function doResume(e: React.FormEvent) {
@@ -312,6 +422,41 @@ export default function Admin() {
         </div>
       )}
 
+      {tab === "projects" && (
+        <div className="card project-admin-card">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div>
+              <h2>项目卡片</h2>
+              <p className="lead">仅已发布项目会出现在访问页；RAG 文档不会自动公开。</p>
+            </div>
+            <button className="theme-btn" type="button" onClick={() => { setProjectForm(EMPTY_PROJECT_FORM); setProjectMsg(""); }}>新增项目</button>
+          </div>
+          <div className="project-editor">
+            <form onSubmit={(event) => { event.preventDefault(); saveProject("draft"); }}>
+              <div className="field"><label htmlFor="p-title">项目名称</label><input id="p-title" value={projectForm.title} onChange={(event) => updateProjectForm("title", event.target.value)} /></div>
+              <div className="field"><label htmlFor="p-summary">一句话简介</label><input id="p-summary" value={projectForm.summary} onChange={(event) => updateProjectForm("summary", event.target.value)} /></div>
+              <div className="field"><label htmlFor="p-background">项目背景 / 问题</label><textarea id="p-background" value={projectForm.background} onChange={(event) => updateProjectForm("background", event.target.value)} /></div>
+              <div className="field"><label htmlFor="p-role">我的职责</label><textarea id="p-role" value={projectForm.role} onChange={(event) => updateProjectForm("role", event.target.value)} /></div>
+              <div className="field"><label htmlFor="p-solutions">关键方案（每行一条，最多 3 条）</label><textarea id="p-solutions" value={projectForm.solutions} onChange={(event) => updateProjectForm("solutions", event.target.value)} /></div>
+              <div className="field"><label htmlFor="p-results">成果数据（每行一条，最多 3 条）</label><textarea id="p-results" value={projectForm.results} onChange={(event) => updateProjectForm("results", event.target.value)} /></div>
+              <div className="field"><label htmlFor="p-tags">技术标签（每行一条，最多 8 条）</label><textarea id="p-tags" value={projectForm.tags} onChange={(event) => updateProjectForm("tags", event.target.value)} /></div>
+              <div className="project-form-row">
+                <div className="field"><label htmlFor="p-sort">排序号</label><input id="p-sort" type="number" min="0" max="9999" value={projectForm.sortOrder} onChange={(event) => updateProjectForm("sortOrder", event.target.value)} /></div>
+                <div className="field"><label htmlFor="p-document">关联 RAG 文档（可选）</label><select id="p-document" value={projectForm.relatedDocumentId} onChange={(event) => updateProjectForm("relatedDocumentId", event.target.value)}><option value="">不关联</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}</select></div>
+              </div>
+              <div className="project-actions"><button className="theme-btn" type="submit">保存草稿</button><button className="btn" type="button" onClick={() => saveProject("published")}>发布</button></div>
+              {projectMsg && <p className={projectMsg.startsWith("✓") ? "ok" : "err"}>{projectMsg}</p>}
+            </form>
+            <ProjectPreview form={projectForm} />
+          </div>
+          <div className="project-records">
+            <h3>已有项目</h3>
+            {projects.length === 0 && <p className="lead">还没有项目卡片。先创建 Cost Hub 草稿，再确认发布。</p>}
+            {projects.map((project) => <div className="m-item project-record" key={project.id}><div><div className="m-meta">{project.status === "published" ? "已发布" : "草稿"} · 排序 {project.sortOrder}</div><strong>{project.title}</strong><div>{project.summary}</div></div><div className="project-record-actions"><button className="theme-btn" type="button" onClick={() => { setProjectForm(formOfProject(project)); setProjectMsg(""); }}>编辑</button>{project.status === "published" && <button className="theme-btn" type="button" onClick={() => unpublishProject(project)}>取消发布</button>}<button className="theme-btn" type="button" onClick={() => deleteProject(project)}>永久删除</button></div></div>)}
+          </div>
+        </div>
+      )}
+
       {tab === "ai" && <AiConfigPanel usage={usage} status={status} selectedProvider={selectedModelProvider} onProviderChange={setSelectedModelProvider} />}
 
       {tab === "resume" && (
@@ -379,6 +524,10 @@ export default function Admin() {
       )}
     </div>
   );
+}
+
+function ProjectPreview({ form }: { form: ProjectForm }) {
+  return <aside className="project-preview" aria-label="项目卡预览"><p className="project-card-label">LIVE PREVIEW</p><h3>{form.title || "项目名称"}</h3><p>{form.summary || "一句话简介会显示在这里。"}</p><div><strong>项目背景 / 问题</strong><p>{form.background || "填写后预览项目背景。"}</p></div><div><strong>我的职责</strong><p>{form.role || "填写后预览个人职责。"}</p></div><div className="project-tags">{lines(form.tags).length ? lines(form.tags).map((tag) => <span key={tag}>{tag}</span>) : <span>技术标签</span>}</div></aside>;
 }
 
 function Stat({ label, on, text }: { label: string; on: boolean; text: string }) {

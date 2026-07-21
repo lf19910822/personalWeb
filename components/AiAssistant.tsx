@@ -33,6 +33,7 @@ export default function AiAssistant() {
   const [docs, setDocs] = useState<DocMeta[]>([]);
   const [model, setModel] = useState<ModelStatus | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const shouldFollowLatestRef = useRef(true);
 
   useEffect(() => {
@@ -43,6 +44,17 @@ export default function AiAssistant() {
         setModel(d.model || null);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const fillProjectQuestion = (event: Event) => {
+      const question = (event as CustomEvent<string>).detail;
+      if (typeof question !== "string" || !question.trim()) return;
+      setInput(question);
+      window.setTimeout(() => inputRef.current?.focus(), 350);
+    };
+    window.addEventListener("ask-project-ai", fillProjectQuestion);
+    return () => window.removeEventListener("ask-project-ai", fillProjectQuestion);
   }, []);
 
   useEffect(() => {
@@ -191,6 +203,7 @@ export default function AiAssistant() {
         </div>
         <div className="chat-input">
           <input
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

@@ -14,6 +14,7 @@ describe("管理员会话", () => {
         }
         if (input === "/api/admin/messages") return new Response(JSON.stringify({ messages: [] }), { status: 200 });
         if (input === "/api/admin/docs") return new Response(JSON.stringify({ documents: [] }), { status: 200 });
+        if (input === "/api/admin/projects") return new Response(JSON.stringify({ projects: [] }), { status: 200 });
         if (input === "/api/admin/usage") return new Response(JSON.stringify({ days: [] }), { status: 200 });
         return new Response(null, { status: 404 });
       })
@@ -27,5 +28,11 @@ describe("管理员会话", () => {
     expect(screen.getByRole("combobox", { name: "聊天模型提供商" })).toHaveValue("qwen");
     expect(screen.getByText("当前实际模型")).toBeInTheDocument();
     expect(screen.getByText("通义千问 · qwen-plus")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "项目" }));
+    expect(screen.getByRole("heading", { name: "项目卡片" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "项目名称" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存草稿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布" })).toBeInTheDocument();
   });
 });
