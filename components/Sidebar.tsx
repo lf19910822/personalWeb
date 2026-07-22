@@ -11,11 +11,13 @@ const NAV = [
 
 export default function Sidebar() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [reduceMotion, setReduceMotion] = useState(false);
   const [active, setActive] = useState("hero");
 
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme") as "light" | "dark" | null;
     setTheme(t || "light");
+    setReduceMotion(document.documentElement.getAttribute("data-reduce-motion") === "true");
   }, []);
 
   useEffect(() => {
@@ -37,6 +39,15 @@ export default function Sidebar() {
     document.documentElement.setAttribute("data-theme", next);
     try {
       localStorage.setItem("theme", next);
+    } catch {}
+  }
+
+  function toggleReduceMotion() {
+    const next = !reduceMotion;
+    setReduceMotion(next);
+    document.documentElement.setAttribute("data-reduce-motion", String(next));
+    try {
+      localStorage.setItem("reduce-motion", String(next));
     } catch {}
   }
 
@@ -71,6 +82,9 @@ export default function Sidebar() {
         </div>
         <button className="theme-btn" onClick={toggle} aria-label="切换明暗主题">
           {theme === "dark" ? "☀ 浅色" : "🌙 深色"}
+        </button>
+        <button className="theme-btn" onClick={toggleReduceMotion} aria-label="减少动态效果" aria-pressed={reduceMotion}>
+          {reduceMotion ? "◌ 减少动态：开" : "✦ 减少动态：关"}
         </button>
       </div>
     </aside>
