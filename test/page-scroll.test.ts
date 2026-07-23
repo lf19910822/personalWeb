@@ -1,23 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Sidebar from "../components/Sidebar";
+import { scrollToPageElement } from "../lib/smooth-scroll";
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("公开侧栏", () => {
-  it("不向访客提供后台入口", () => {
-    render(<Sidebar />);
-
-    expect(screen.queryByRole("link", { name: "后台" })).not.toBeInTheDocument();
-  });
-
-  it("默认播放动态效果，且不提供减少动态按钮", () => {
-    render(<Sidebar />);
-
-    expect(screen.queryByRole("button", { name: "减少动态效果" })).not.toBeInTheDocument();
-  });
-
-  it("侧栏跳转使用统一的页面滚动", () => {
+describe("统一页面滚动", () => {
+  it("使用与项目卡片相同的动画，并在动画期间锁定滚轮", () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -28,15 +15,19 @@ describe("公开侧栏", () => {
     Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
     Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 2000 });
+
     const target = document.createElement("section");
-    target.id = "ai";
     vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 1000, height: 100 } as DOMRect);
-    document.body.append(target);
 
-    render(<Sidebar />);
-    fireEvent.click(screen.getByRole("link", { name: /AI 助手/ }));
-
+    const cancel = scrollToPageElement(target);
     expect(frames).toHaveLength(1);
-    target.remove();
+    const wheel = new Event("wheel", { cancelable: true });
+    window.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+
+    cancel();
+    const afterCancellation = new Event("wheel", { cancelable: true });
+    window.dispatchEvent(afterCancellation);
+    expect(afterCancellation.defaultPrevented).toBe(false);
   });
 });

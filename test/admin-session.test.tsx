@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Admin from "../app/admin/page";
 
@@ -31,7 +31,12 @@ describe("管理员会话", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "项目" }));
     expect(screen.getByRole("heading", { name: "项目卡片" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "项目名称" })).toBeInTheDocument();
+    const titleInput = screen.getByRole("textbox", { name: "项目名称" });
+    const preview = screen.getByLabelText("项目卡预览");
+    expect(preview.compareDocumentPosition(titleInput.closest("form")!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(preview).toHaveClass("project-card");
+    expect(within(preview).getByRole("heading", { name: "关键方案" })).toBeInTheDocument();
+    expect(within(preview).getByRole("heading", { name: "成果" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存草稿" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发布" })).toBeInTheDocument();
   });

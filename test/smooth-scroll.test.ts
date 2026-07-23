@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { scrollToElement } from "../lib/smooth-scroll";
+import { getScrollTopOffset, scrollToElement } from "../lib/smooth-scroll";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("项目卡片自动滚动", () => {
+  it("将展开卡片定位在约 200px 的视口安全边距，并适配较矮屏幕", () => {
+    expect(getScrollTopOffset(1200)).toBe(200);
+    expect(getScrollTopOffset(900)).toBe(200);
+    expect(getScrollTopOffset(768)).toBe(200);
+    expect(getScrollTopOffset(600)).toBe(200);
+    expect(getScrollTopOffset(450)).toBe(180);
+  });
+
   it("滚动动画期间阻止滚轮，并在取消或结束后立刻恢复", () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {

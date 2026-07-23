@@ -1,23 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import Sidebar from "../components/Sidebar";
+import Hero from "../components/Hero";
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("公开侧栏", () => {
-  it("不向访客提供后台入口", () => {
-    render(<Sidebar />);
-
-    expect(screen.queryByRole("link", { name: "后台" })).not.toBeInTheDocument();
-  });
-
-  it("默认播放动态效果，且不提供减少动态按钮", () => {
-    render(<Sidebar />);
-
-    expect(screen.queryByRole("button", { name: "减少动态效果" })).not.toBeInTheDocument();
-  });
-
-  it("侧栏跳转使用统一的页面滚动", () => {
+describe("首屏导航", () => {
+  it("向 AI 提问使用统一的页面滚动", () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -33,10 +21,12 @@ describe("公开侧栏", () => {
     vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 1000, height: 100 } as DOMRect);
     document.body.append(target);
 
-    render(<Sidebar />);
-    fireEvent.click(screen.getByRole("link", { name: /AI 助手/ }));
+    render(<Hero />);
+    fireEvent.click(screen.getByRole("link", { name: "向 AI 提问 →" }));
 
     expect(frames).toHaveLength(1);
+    frames.shift()!(0);
+    frames.shift()!(500);
     target.remove();
   });
 });

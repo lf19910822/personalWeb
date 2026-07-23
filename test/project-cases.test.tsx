@@ -32,8 +32,46 @@ describe("公开项目案例", () => {
     window.removeEventListener("ask-project-ai", onAsk);
   });
 
+  it("项目追问使用统一的页面滚动", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.stubGlobal("scrollTo", vi.fn());
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    Object.defineProperty(document.documentElement, "scrollHeight", { configurable: true, value: 2000 });
+    const target = document.createElement("section");
+    target.id = "ai";
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({ top: 1000, height: 100 } as DOMRect);
+    document.body.append(target);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ projects: [{
+        id: "cost-hub",
+        title: "Cost Hub",
+        summary: "简介",
+        background: "背景",
+        role: "职责",
+        solutions: ["方案"],
+        results: ["成果"],
+        tags: ["Go"],
+        sortOrder: 1,
+      }] })))
+    );
+
+    render(<ProjectCases />);
+    fireEvent.click(await screen.findByRole("button", { name: "向 AI 了解此项目" }));
+
+    expect(frames).toHaveLength(1);
+    frames.shift()!(0);
+    frames.shift()!(500);
+    target.remove();
+  });
+
   it("点击上方标题条后，将对应项目移到展开位而不请求后台更新", async () => {
-    document.documentElement.setAttribute("data-reduce-motion", "false");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ projects: [
@@ -53,12 +91,8 @@ describe("公开项目案例", () => {
     expect(screen.getByRole("button", { name: "展开项目三" })).toBeInTheDocument();
   });
 
-  it("站内未开启减少动态时，系统偏好不应取消项目切换的平滑滚动", async () => {
-    document.documentElement.setAttribute("data-reduce-motion", "false");
-    const scrollIntoView = vi.fn();
+  it("项目切换始终使用统一的平滑滚动", async () => {
     const requestAnimationFrame = vi.fn(() => 1);
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
-    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     vi.stubGlobal(
@@ -74,7 +108,6 @@ describe("公开项目案例", () => {
     expect(await screen.findByRole("heading", { name: "项目二" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "展开项目一" }));
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalledTimes(1));
-    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("异步加载的项目区进入视口后也会显示", async () => {
@@ -112,7 +145,6 @@ describe("公开项目案例", () => {
   });
 
   it("在 500ms 内以缓入缓出方式滚动到新展开的项目卡片", async () => {
-    document.documentElement.setAttribute("data-reduce-motion", "false");
     const frames: FrameRequestCallback[] = [];
     const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -149,9 +181,9 @@ describe("公开项目案例", () => {
     frames.shift()!(375);
     frames.shift()!(500);
 
-    expect(scrollTo).toHaveBeenNthCalledWith(2, { top: 137.5, behavior: "auto" });
-    expect(scrollTo).toHaveBeenNthCalledWith(3, { top: 400, behavior: "auto" });
-    expect(scrollTo).toHaveBeenNthCalledWith(4, { top: 662.5, behavior: "auto" });
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 700, behavior: "auto" });
+    expect(scrollTo).toHaveBeenNthCalledWith(2, { top: 153.5, behavior: "auto" });
+    expect(scrollTo).toHaveBeenNthCalledWith(3, { top: 528, behavior: "auto" });
+    expect(scrollTo).toHaveBeenNthCalledWith(4, { top: 902.5, behavior: "auto" });
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 956, behavior: "auto" });
   });
 });

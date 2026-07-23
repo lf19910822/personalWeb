@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { scrollToPageElement } from "@/lib/smooth-scroll";
 
 export default function Hero() {
   const [open, setOpen] = useState(false);
@@ -22,6 +23,15 @@ export default function Hero() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  function askAi(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = document.getElementById("ai");
+    if (!target) return;
+    event.preventDefault();
+    window.history.pushState(null, "", "#ai");
+    scrollToPageElement(target);
+  }
+
   return (
     <section id="hero" className="reveal">
       <div className="eyebrow">Personal Profile</div>
@@ -33,7 +43,7 @@ export default function Hero() {
         <button className="btn-resume" type="button" onClick={() => setOpen(true)}>
           📄 查看个人简历 PDF
         </button>
-        <a className="btn-ghost" href="#ai">
+        <a className="btn-ghost" href="#ai" onClick={askAi}>
           向 AI 提问 →
         </a>
       </div>

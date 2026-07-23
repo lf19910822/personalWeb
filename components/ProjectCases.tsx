@@ -1,17 +1,11 @@
 "use client";
 
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import { scrollToElement } from "@/lib/smooth-scroll";
+import { ProjectCardContent, type ProjectCardContentData } from "@/components/ProjectCardContent";
+import { scrollToPageElement } from "@/lib/smooth-scroll";
 
-type ProjectCard = {
+type ProjectCard = ProjectCardContentData & {
   id: string;
-  title: string;
-  summary: string;
-  background: string;
-  role: string;
-  solutions: string[];
-  results: string[];
-  tags: string[];
   sortOrder: number;
 };
 const STACK_HEADER_HEIGHT = 56;
@@ -53,20 +47,18 @@ export default function ProjectCases() {
     scrollTimer.current = window.setTimeout(() => {
       const target = stackRef.current?.querySelector<HTMLElement>(`[data-project-id="${id}"]`);
       if (!target) return;
-      const reducedMotion = document.documentElement.getAttribute("data-reduce-motion") === "true";
-      if (reducedMotion) {
-        target.scrollIntoView({ behavior: "auto", block: "center" });
-        return;
-      }
       cancelScroll.current?.();
-      cancelScroll.current = scrollToElement(target);
+      const stackOffset = Number.parseFloat(target.style.getPropertyValue("--stack-offset")) || 0;
+      const fromStackOffset = Number.parseFloat(target.style.getPropertyValue("--from-stack-offset")) || 0;
+      cancelScroll.current = scrollToPageElement(target, { targetTopAdjustment: stackOffset - fromStackOffset });
     }, 0);
   }, [order]);
 
   function askAbout(project: ProjectCard) {
     const question = `请介绍 ${project.title} 中的架构设计、我的职责与项目成果。`;
     window.dispatchEvent(new CustomEvent("ask-project-ai", { detail: question }));
-    document.querySelector("#ai")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const target = document.getElementById("ai");
+    if (target) scrollToPageElement(target);
   }
 
   if (!projects?.length) return null;
@@ -100,7 +92,7 @@ export default function ProjectCases() {
           const stackStyle = isStack ? { "--stack-offset": `${index * STACK_HEADER_HEIGHT}px`, "--from-stack-offset": `${fromIndex * STACK_HEADER_HEIGHT}px`, zIndex: active ? orderedProjects.length + 1 : orderedProjects.length - index } as CSSProperties : undefined;
           return (
             <article className={"project-card" + (active ? " is-active" : " is-collapsed") + (movingToActive ? " is-moving-to-active" : "")} key={project.id} style={stackStyle} data-project-id={project.id}>
-              {active ? <ProjectCardDetails project={project} onAsk={() => askAbout(project)} /> : (
+              {active ? <ProjectCardContent project={project} onAsk={() => askAbout(project)} /> : (
                 <button className="project-stack-tab" type="button" onClick={() => activate(project.id)} aria-label={`展开${project.title}`}>
                   <span>{project.title}</span><span aria-hidden="true">↗</span>
                 </button>
@@ -111,8 +103,4 @@ export default function ProjectCases() {
       </div>
     </section>
   );
-}
-
-function ProjectCardDetails({ project, onAsk }: { project: ProjectCard; onAsk: () => void }) {
-  return <><header className="project-card-head"><div><p className="project-card-label">PROJECT CASE</p><h3>{project.title}</h3><p>{project.summary}</p></div></header><div className="project-card-grid"><section><h4>背景 / 问题</h4><p>{project.background}</p></section><section><h4>我的职责</h4><p>{project.role}</p></section><section><h4>关键方案</h4><ul>{project.solutions.map((item) => <li key={item}>{item}</li>)}</ul></section><section><h4>成果</h4><ul>{project.results.map((item) => <li key={item}>{item}</li>)}</ul></section></div><footer className="project-card-foot"><div className="project-tags" aria-label="技术标签">{project.tags.map((tag) => <span key={tag}>{tag}</span>)}</div><button className="project-ask" type="button" onClick={onAsk}>向 AI 了解此项目 <span aria-hidden="true">→</span></button></footer></>;
 }

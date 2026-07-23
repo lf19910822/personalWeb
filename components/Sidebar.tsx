@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
+import { scrollToPageElement } from "@/lib/smooth-scroll";
 
 const NAV = [
   { id: "hero", idx: "01", label: "首页" },
@@ -11,13 +12,11 @@ const NAV = [
 
 export default function Sidebar() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [reduceMotion, setReduceMotion] = useState(false);
   const [active, setActive] = useState("hero");
 
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme") as "light" | "dark" | null;
     setTheme(t || "light");
-    setReduceMotion(document.documentElement.getAttribute("data-reduce-motion") === "true");
   }, []);
 
   useEffect(() => {
@@ -42,13 +41,14 @@ export default function Sidebar() {
     } catch {}
   }
 
-  function toggleReduceMotion() {
-    const next = !reduceMotion;
-    setReduceMotion(next);
-    document.documentElement.setAttribute("data-reduce-motion", String(next));
-    try {
-      localStorage.setItem("reduce-motion", String(next));
-    } catch {}
+  function navigateToSection(event: MouseEvent<HTMLAnchorElement>, id: string) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = document.getElementById(id);
+    if (!target) return;
+    event.preventDefault();
+    setActive(id);
+    window.history.pushState(null, "", `#${id}`);
+    scrollToPageElement(target);
   }
 
   return (
@@ -67,6 +67,7 @@ export default function Sidebar() {
             key={n.id}
             className={`s-link${active === n.id ? " active" : ""}`}
             href={`#${n.id}`}
+            onClick={(event) => navigateToSection(event, n.id)}
           >
             <span className="idx">{n.idx}</span> {n.label}
           </a>
@@ -82,9 +83,6 @@ export default function Sidebar() {
         </div>
         <button className="theme-btn" onClick={toggle} aria-label="切换明暗主题">
           {theme === "dark" ? "☀ 浅色" : "🌙 深色"}
-        </button>
-        <button className="theme-btn" onClick={toggleReduceMotion} aria-label="减少动态效果" aria-pressed={reduceMotion}>
-          {reduceMotion ? "◌ 减少动态：开" : "✦ 减少动态：关"}
         </button>
       </div>
     </aside>

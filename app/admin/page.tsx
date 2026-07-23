@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ProjectCardContent, type ProjectCardContentData } from "@/components/ProjectCardContent";
 import { RagPreviewTable, type RagPreview } from "./rag-preview-table";
 import { UsageChart, type UsageDay } from "./usage-chart";
 import type { ProjectCard, ProjectStatus } from "@/lib/project-cards";
@@ -432,6 +433,7 @@ export default function Admin() {
             <button className="theme-btn" type="button" onClick={() => { setProjectForm(EMPTY_PROJECT_FORM); setProjectMsg(""); }}>新增项目</button>
           </div>
           <div className="project-editor">
+            <ProjectPreview form={projectForm} />
             <form onSubmit={(event) => { event.preventDefault(); saveProject("draft"); }}>
               <div className="field"><label htmlFor="p-title">项目名称</label><input id="p-title" value={projectForm.title} onChange={(event) => updateProjectForm("title", event.target.value)} /></div>
               <div className="field"><label htmlFor="p-summary">一句话简介</label><input id="p-summary" value={projectForm.summary} onChange={(event) => updateProjectForm("summary", event.target.value)} /></div>
@@ -447,7 +449,6 @@ export default function Admin() {
               <div className="project-actions"><button className="theme-btn" type="submit">保存草稿</button><button className="btn" type="button" onClick={() => saveProject("published")}>发布</button></div>
               {projectMsg && <p className={projectMsg.startsWith("✓") ? "ok" : "err"}>{projectMsg}</p>}
             </form>
-            <ProjectPreview form={projectForm} />
           </div>
           <div className="project-records">
             <h3>已有项目</h3>
@@ -527,7 +528,17 @@ export default function Admin() {
 }
 
 function ProjectPreview({ form }: { form: ProjectForm }) {
-  return <aside className="project-preview" aria-label="项目卡预览"><p className="project-card-label">LIVE PREVIEW</p><h3>{form.title || "项目名称"}</h3><p>{form.summary || "一句话简介会显示在这里。"}</p><div><strong>项目背景 / 问题</strong><p>{form.background || "填写后预览项目背景。"}</p></div><div><strong>我的职责</strong><p>{form.role || "填写后预览个人职责。"}</p></div><div className="project-tags">{lines(form.tags).length ? lines(form.tags).map((tag) => <span key={tag}>{tag}</span>) : <span>技术标签</span>}</div></aside>;
+  const project: ProjectCardContentData = {
+    title: form.title || "项目名称",
+    summary: form.summary || "一句话简介会显示在这里。",
+    background: form.background || "填写后预览项目背景。",
+    role: form.role || "填写后预览个人职责。",
+    solutions: lines(form.solutions).length ? lines(form.solutions) : ["填写后预览关键方案。"],
+    results: lines(form.results).length ? lines(form.results) : ["填写后预览成果数据。"],
+    tags: lines(form.tags).length ? lines(form.tags) : ["技术标签"],
+  };
+
+  return <article className="project-card project-preview" aria-label="项目卡预览"><ProjectCardContent project={project} headerLabel="LIVE PREVIEW" /></article>;
 }
 
 function Stat({ label, on, text }: { label: string; on: boolean; text: string }) {
